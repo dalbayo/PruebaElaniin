@@ -6,6 +6,7 @@ import java.time.Clock;
 
 /**
  * Entry point used by our automated tests. Keep this signature exactly as it is,
+ * is,
  * and build your implementation here.
  */
 public final class Inventory {
