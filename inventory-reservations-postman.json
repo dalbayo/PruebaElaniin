@@ -1,0 +1,1961 @@
+{
+  "info": {
+    "name": "Inventory Reservations API",
+    "description": "# Inventory Reservations API\n\nColección de Postman para probar de principio a fin la API REST del servicio de reservas de inventario (`com.store.inventory.web`).\n\nLa colección recorre el flujo principal del servicio: registra productos, agrega stock, consulta disponibilidad, crea reservas, confirma pedidos y verifica los casos que la API debe rechazar.\n\n## Antes de empezar\n\n1. Inicia la aplicación con `mvn spring-boot:run`, o genera el JAR con `mvn package -DskipTests` y ejecútalo con `java -jar target/inventory-reservations-1.0.0.jar`.\n2. Por defecto, la aplicación escucha en `http://localhost:8080`.\n3. Si utilizas otro puerto, actualiza la variable `baseUrl`.\n4. No necesitas autenticación y no hay una base de datos detrás de esta prueba. La información se mantiene en memoria y se pierde cuando reinicias la aplicación.\n\n## Cómo ejecutar la colección\n\n### Desde Postman\n\nAbre el **Collection Runner**, selecciona esta colección y ejecútala **completa y en el orden en que aparece**.\n\n### Desde Newman\n\n```bash\nnpx newman run postman/inventory-reservations-collection.json\n```\n\nSi la aplicación utiliza otro puerto:\n\n```bash\nnpx newman run postman/inventory-reservations-collection.json --env-var baseUrl=http://localhost:9090\n```\n\n## Por qué es importante respetar el orden\n\nLas carpetas forman un flujo. Primero se crean los productos, después se agrega el stock, luego se consulta la disponibilidad, se realizan las reservas y finalmente se confirman.\n\nLa petición **00 Preparación** genera identificadores únicos para cada ejecución. Esto permite repetir la colección sin tener que reiniciar la aplicación.\n\nPuedes ejecutar peticiones individuales, pero algunas dependen de los datos creados por las peticiones anteriores y, por tanto, pueden fallar si no se ejecutó previamente el flujo correspondiente.\n\n## Qué cubre cada carpeta\n\n| Carpeta | Peticiones | Qué valida |\n| --- | ---: | --- |\n| 00 Preparación | 1 | Inicializa una ejecución y genera identificadores únicos. |\n| 01 Productos | 9 | Registro de productos y validación de datos inválidos. |\n| 02 Stock | 7 | Carga de inventario y validación de cantidades inválidas. |\n| 03 Disponibilidad | 2 | Consulta del stock que todavía puede reservarse. |\n| 04 Reservas | 14 | Creación de reservas, reenvíos, límites por categoría y falta de stock. |\n| 05 Confirmaciones | 6 | Confirmación del pago, reenvíos y pedidos desconocidos. |\n| 06 Expiración (manual) | 2 | Liberación del stock cuando una reserva vence. Requiere esperar 5 minutos. |\n\n## Códigos de error\n\nLos errores siguen una estructura común:\n\n`{\"status\": 409, \"code\": \"INSUFFICIENT_STOCK\", \"message\": \"...\"}`\n\n| HTTP | Código | Cuándo se utiliza |\n| ---: | --- | --- |\n| 400 | `INVALID_REQUEST` | La petición está incompleta o contiene datos inválidos. También se utiliza para conflictos de categoría o de pedido. |\n| 409 | `INSUFFICIENT_STOCK` | No hay suficientes unidades disponibles o el producto no existe. |\n| 409 | `INVALID_STATE` | Se intenta confirmar un pedido que no tiene una reserva activa. |\n| 422 | `ORDER_LIMIT_EXCEEDED` | El pedido supera el límite permitido para su categoría. Por ejemplo, `FLASH_SALE` permite hasta 2 unidades. |\n\n## Resultado esperado\n\nEn una ejecución completa y normal se esperan **41 peticiones y 131 aserciones en verde**.\n\nLas dos pruebas de la carpeta **06 Expiración** pueden aparecer como **omitidas** si todavía no han transcurrido 5 minutos desde la reserva `FLASH_SALE`. Esto es intencional y no representa un fallo.\n\n## Qué no cubre esta colección\n\n- **Avisos de bajo stock:** no existe un endpoint para probarlos. El servicio los envía a `StockAlertListener`, que en esta aplicación únicamente escribe el aviso en el log. Estos casos se validan mediante los tests de Java.\n- **Expiración exacta:** el comportamiento en el instante preciso en que vence una reserva se prueba en Java utilizando un reloj controlado. En Postman solo puede comprobarse esperando el tiempo real.\n- **Concurrencia:** los escenarios con varios clientes reservando al mismo tiempo se validan en Java mediante `ConcurrencyTest`.\n- **Diferencias de hora:** las comprobaciones de vencimiento utilizan el reloj de la máquina desde la que se ejecuta Postman. Si la aplicación y Postman están en equipos con relojes significativamente desfasados, estas pruebas pueden fallar.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string",
+      "description": "URL base de la aplicación. Por defecto es `http://localhost:8080`. Cámbiala si la aplicación utiliza otro puerto."
+    },
+    {
+      "key": "runId",
+      "value": "manual",
+      "type": "string",
+      "description": "Identificador único de la ejecución. Lo genera automáticamente la petición `Inicializar corrida` y se utiliza para crear SKU y pedidos que no interfieran con ejecuciones anteriores."
+    },
+    {
+      "key": "skuStd",
+      "value": "STD-manual",
+      "type": "string",
+      "description": "SKU del producto de prueba `STANDARD`. Esta categoría tiene 15 minutos para completar el pago y no tiene límite de unidades por pedido."
+    },
+    {
+      "key": "skuFlash",
+      "value": "FLASH-manual",
+      "type": "string",
+      "description": "SKU del producto de prueba `FLASH_SALE`. La reserva dura 5 minutos y cada pedido puede incluir como máximo 2 unidades."
+    },
+    {
+      "key": "skuPre",
+      "value": "PRE-manual",
+      "type": "string",
+      "description": "SKU del producto de prueba `PRE_ORDER`. La reserva dura 24 horas y no tiene límite de unidades por pedido."
+    },
+    {
+      "key": "orderA",
+      "value": "ORDER-A-manual",
+      "type": "string",
+      "description": "Pedido principal de la prueba. Reserva 3 unidades `STANDARD` y posteriormente se confirma en la carpeta `05 Confirmaciones`."
+    },
+    {
+      "key": "orderB",
+      "value": "ORDER-B-manual",
+      "type": "string",
+      "description": "Pedido utilizado en los escenarios que deben fallar, por ejemplo, cuando no hay stock, el producto no existe o se supera un límite. No llega a tener una reserva válida."
+    },
+    {
+      "key": "orderFlash",
+      "value": "ORDER-F-manual",
+      "type": "string",
+      "description": "Pedido utilizado para probar la expiración de una reserva `FLASH_SALE`. Reserva 2 unidades y se deja sin confirmar para comprobar que el stock se libera después de 5 minutos."
+    },
+    {
+      "key": "orderAExpires",
+      "value": "",
+      "type": "string",
+      "description": "Fecha y hora de vencimiento de la reserva de `orderA`, en formato ISO. La colección la guarda al crear la reserva para comprobar que un reenvío mantiene el mismo vencimiento."
+    },
+    {
+      "key": "orderFlashExpires",
+      "value": "",
+      "type": "string",
+      "description": "Fecha y hora de vencimiento de la reserva `FLASH_SALE`, en formato ISO. La colección la guarda para que la carpeta `06 Expiración` pueda determinar cuándo realizar las comprobaciones."
+    },
+    {
+      "key": "confirmTarget",
+      "value": "PENDING-manual",
+      "type": "string",
+      "description": "Pedido utilizado por la prueba de confirmación. Mientras la reserva `FLASH_SALE` siga activa apunta deliberadamente a un pedido inexistente, para evitar confirmarla antes de tiempo."
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Preparación",
+      "description": "Inicia una nueva ejecución de la colección. Genera un identificador único y, a partir de él, crea los SKU y pedidos que utilizarán las demás carpetas. Así puedes repetir la colección sin reiniciar la aplicación.",
+      "item": [
+        {
+          "name": "Inicializar corrida",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const run = Date.now().toString(36);",
+                  "const set = (k, v) => pm.collectionVariables.set(k, v);",
+                  "set(\"runId\", run);",
+                  "set(\"skuStd\", \"STD-\" + run);",
+                  "set(\"skuFlash\", \"FLASH-\" + run);",
+                  "set(\"skuPre\", \"PRE-\" + run);",
+                  "set(\"orderA\", \"ORDER-A-\" + run);",
+                  "set(\"orderB\", \"ORDER-B-\" + run);",
+                  "set(\"orderFlash\", \"ORDER-F-\" + run);",
+                  "set(\"orderAExpires\", \"\");",
+                  "set(\"orderFlashExpires\", \"\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Un producto desconocido tiene 0 unidades\", function () { pm.expect(body.available).to.eql(0); });",
+                  "pm.test(\"Se generó el runId\", function () { pm.expect(pm.collectionVariables.get(\"runId\")).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/probe/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "probe",
+                "availability"
+              ]
+            },
+            "description": "Es la primera petición de la ejecución. El script previo genera un `runId` y los identificadores únicos que utilizarán las pruebas. La petición consulta un producto inexistente y confirma que la API responde **200** con **0** unidades disponibles."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 Productos",
+      "description": "`POST /api/products`: registra productos y asigna una categoría (`STANDARD`, `PRE_ORDER` o `FLASH_SALE`). Además de crear los productos que necesita el flujo, esta carpeta comprueba cómo responde la API ante datos inválidos o conflictos.",
+      "item": [
+        {
+          "name": "Registrar producto STANDARD",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Devuelve el SKU\", function () { pm.expect(body.sku).to.eql(pm.collectionVariables.get(\"skuStd\")); });",
+                  "pm.test(\"Devuelve la categoría\", function () { pm.expect(body.category).to.eql(\"STANDARD\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{skuStd}}\",\n  \"category\": \"STANDARD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea `{{skuStd}}` como producto `STANDARD`. Esta categoría permite pagar durante 15 minutos y no tiene límite de unidades por pedido. Se espera **201** y que la respuesta incluya el SKU y la categoría."
+          },
+          "response": []
+        },
+        {
+          "name": "Registrar producto FLASH_SALE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Devuelve la categoría\", function () { pm.expect(body.category).to.eql(\"FLASH_SALE\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{skuFlash}}\",\n  \"category\": \"FLASH_SALE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea `{{skuFlash}}` como `FLASH_SALE`. Esta categoría permite 5 minutos para pagar y un máximo de 2 unidades por pedido. Se espera **201**."
+          },
+          "response": []
+        },
+        {
+          "name": "Registrar producto PRE_ORDER",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Devuelve la categoría\", function () { pm.expect(body.category).to.eql(\"PRE_ORDER\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{skuPre}}\",\n  \"category\": \"PRE_ORDER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea `{{skuPre}}` como `PRE_ORDER`. Esta categoría permite 24 horas para pagar y no tiene límite de unidades por pedido. Se espera **201**."
+          },
+          "response": []
+        },
+        {
+          "name": "Registrar de nuevo con la misma categoría",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{skuStd}}\",\n  \"category\": \"STANDARD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Vuelve a registrar `{{skuStd}}` con la misma categoría `STANDARD`. Registrar nuevamente el mismo producto con la misma categoría es válido y debe responder **201**."
+          },
+          "response": []
+        },
+        {
+          "name": "Registrar con otra categoría (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });",
+                  "pm.test(\"El mensaje indica que ya estaba registrado\", function () { pm.expect(body.message).to.include(\"already registered\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{skuStd}}\",\n  \"category\": \"FLASH_SALE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intenta cambiar `{{skuStd}}`, que ya es `STANDARD`, a `FLASH_SALE`. La API debe rechazar el cambio con **400** (`INVALID_REQUEST`) porque la categoría determina las reglas de la reserva."
+          },
+          "response": []
+        },
+        {
+          "name": "Categoría inexistente (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"X-{{runId}}\",\n  \"category\": \"NOPE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envía la categoría `NOPE`, que no forma parte de las categorías permitidas. La API debe responder **400** (`INVALID_REQUEST`)."
+          },
+          "response": []
+        },
+        {
+          "name": "SKU en blanco (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"   \",\n  \"category\": \"STANDARD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envía un SKU compuesto únicamente por espacios. La API debe rechazar la petición con **400** (`INVALID_REQUEST`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Sin SKU (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });",
+                  "pm.test(\"El mensaje pide el SKU\", function () { pm.expect(body.message).to.eql(\"sku is required\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"STANDARD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Omite el campo `sku`. La API debe responder **400** con el mensaje `sku is required`."
+          },
+          "response": []
+        },
+        {
+          "name": "Cuerpo mal formado (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{not json",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envía un cuerpo que no es JSON válido (`{not json`). La API debe responder **400** (`INVALID_REQUEST`) sin exponer detalles técnicos del error."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 Stock",
+      "description": "`POST /api/products/{sku}/stock`: agrega unidades a un producto ya registrado y devuelve la cantidad disponible. Esta carpeta depende de que los productos hayan sido creados en `01 Productos`.",
+      "item": [
+        {
+          "name": "Agregar 10 unidades STANDARD",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Devuelve el SKU\", function () { pm.expect(body.sku).to.eql(pm.collectionVariables.get(\"skuStd\")); });",
+                  "pm.test(\"Hay 10 unidades disponibles\", function () { pm.expect(body.available).to.eql(10); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Agrega 10 unidades a `{{skuStd}}`. Se espera **200** y `available: 10`. Este stock se utiliza en las pruebas de disponibilidad, reservas y confirmaciones."
+          },
+          "response": []
+        },
+        {
+          "name": "Agregar 10 unidades FLASH_SALE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 10 unidades disponibles\", function () { pm.expect(body.available).to.eql(10); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuFlash}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuFlash}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Agrega 10 unidades a `{{skuFlash}}`. Se espera **200** con `available: 10`."
+          },
+          "response": []
+        },
+        {
+          "name": "Agregar 10 unidades PRE_ORDER",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 10 unidades disponibles\", function () { pm.expect(body.available).to.eql(10); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuPre}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuPre}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Agrega 10 unidades a `{{skuPre}}`. Se espera **200** con `available: 10`."
+          },
+          "response": []
+        },
+        {
+          "name": "Cantidad 0 (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intenta agregar 0 unidades. La cantidad debe ser positiva, por lo que la API debe responder **400**."
+          },
+          "response": []
+        },
+        {
+          "name": "Cantidad negativa (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": -3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intenta agregar -3 unidades. La cantidad negativa no es válida y debe producir una respuesta **400**."
+          },
+          "response": []
+        },
+        {
+          "name": "Sin cantidad (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });",
+                  "pm.test(\"El mensaje pide la cantidad\", function () { pm.expect(body.message).to.eql(\"quantity is required\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Omite `quantity`. La API debe responder **400** con el mensaje `quantity is required`."
+          },
+          "response": []
+        },
+        {
+          "name": "Producto no registrado (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });",
+                  "pm.test(\"El mensaje indica que no está registrado\", function () { pm.expect(body.message).to.include(\"not registered\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/GHOST-{{runId}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "GHOST-{{runId}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intenta agregar stock a un SKU que nunca fue registrado. La API debe responder **400** e indicar que el producto no está registrado."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 Disponibilidad",
+      "description": "`GET /api/products/{sku}/availability`: consulta cuántas unidades siguen disponibles para reservar. El resultado refleja el stock que no está vendido ni apartado por reservas activas.",
+      "item": [
+        {
+          "name": "Disponibilidad STANDARD (10)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 10 unidades disponibles\", function () { pm.expect(body.available).to.eql(10); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "availability"
+              ]
+            },
+            "description": "Consulta la disponibilidad de `{{skuStd}}` antes de crear reservas. Como se agregaron 10 unidades y todavía no hay ninguna reserva, se esperan **10 unidades disponibles** y una respuesta **200**."
+          },
+          "response": []
+        },
+        {
+          "name": "Producto desconocido devuelve 0",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 0 unidades disponibles\", function () { pm.expect(body.available).to.eql(0); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/GHOST-{{runId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "GHOST-{{runId}}",
+                "availability"
+              ]
+            },
+            "description": "Consulta un SKU que no existe. Según el contrato de la API, un producto desconocido se considera con **0 unidades disponibles** y la respuesta es **200**, no **404**."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 Reservas",
+      "description": "`POST /api/reservations`: crea una reserva para un pedido. Cada pedido puede reservar un solo producto. La operación es idempotente: si el mismo pedido se reenvía, la API devuelve la reserva existente y no descuenta el stock otra vez.",
+      "item": [
+        {
+          "name": "Reservar 3 unidades STANDARD",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Devuelve pedido, SKU y cantidad\", function () { pm.expect(body.orderId).to.eql(pm.collectionVariables.get(\"orderA\")); pm.expect(body.sku).to.eql(pm.collectionVariables.get(\"skuStd\")); pm.expect(body.quantity).to.eql(3); });",
+                  "pm.test(\"expiresAt es una fecha ISO válida\", function () { pm.expect(new Date(body.expiresAt).toString()).to.not.eql(\"Invalid Date\"); });",
+                  "pm.test(\"expiresAt está entre 13 y 17 minutos a partir de ahora\", function () { const mins = (new Date(body.expiresAt) - Date.now()) / 60000; pm.expect(mins).to.be.within(13, 17); });",
+                  "pm.collectionVariables.set(\"orderAExpires\", body.expiresAt);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderA}}\",\n  \"sku\": \"{{skuStd}}\",\n  \"quantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reserva 3 unidades de `{{skuStd}}` para `{{orderA}}`. Se espera **201** con el pedido, SKU y cantidad. También se valida que `expiresAt` sea una fecha válida y que el vencimiento esté aproximadamente 15 minutos después de la reserva. La fecha se guarda en `orderAExpires` para las pruebas posteriores."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad tras reservar (7)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 7 unidades disponibles\", function () { pm.expect(body.available).to.eql(7); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "availability"
+              ]
+            },
+            "description": "Comprueba el efecto de la reserva sobre el stock disponible. Después de reservar 3 de las 10 unidades, deben quedar **7 disponibles**."
+          },
+          "response": []
+        },
+        {
+          "name": "Reenviar el mismo pedido (idempotente)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Devuelve la misma reserva, con el mismo vencimiento\", function () { pm.expect(body.expiresAt).to.eql(pm.collectionVariables.get(\"orderAExpires\")); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderA}}\",\n  \"sku\": \"{{skuStd}}\",\n  \"quantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envía exactamente la misma reserva una segunda vez, simulando un reintento de la aplicación móvil. La API debe responder **201** y devolver la misma reserva con el mismo `expiresAt`; el reenvío no debe extender el plazo."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad no cambia tras el reenvío (7)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 7 unidades disponibles\", function () { pm.expect(body.available).to.eql(7); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "availability"
+              ]
+            },
+            "description": "Verifica que el reenvío no vuelva a descontar unidades. La disponibilidad debe seguir siendo **7**."
+          },
+          "response": []
+        },
+        {
+          "name": "Mismo pedido con otra cantidad (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });",
+                  "pm.test(\"El mensaje indica la cantidad ya reservada\", function () { pm.expect(body.message).to.include(\"already reserved\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderA}}\",\n  \"sku\": \"{{skuStd}}\",\n  \"quantity\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intenta reutilizar `{{orderA}}`, pero solicitando 4 unidades en lugar de las 3 originales. Como ya existe una reserva para ese pedido, la API debe rechazar el cambio con **400**."
+          },
+          "response": []
+        },
+        {
+          "name": "Mismo pedido con otro producto (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });",
+                  "pm.test(\"El mensaje indica a qué producto pertenece el pedido\", function () { pm.expect(body.message).to.include(\"belongs to product\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderA}}\",\n  \"sku\": \"{{skuFlash}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intenta asociar `{{orderA}}` a otro producto. Un pedido solo puede pertenecer a un producto, por lo que la API debe responder **400**."
+          },
+          "response": []
+        },
+        {
+          "name": "Stock insuficiente (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INSUFFICIENT_STOCK\", function () { pm.expect(body.code).to.eql(\"INSUFFICIENT_STOCK\"); });",
+                  "pm.test(\"El cuerpo trae el estado 409\", function () { pm.expect(body.status).to.eql(409); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderB}}\",\n  \"sku\": \"{{skuStd}}\",\n  \"quantity\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Solicita 100 unidades de `{{skuStd}}` cuando solo quedan 7 disponibles. La API debe responder **409** con `INSUFFICIENT_STOCK`."
+          },
+          "response": []
+        },
+        {
+          "name": "Producto desconocido (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INSUFFICIENT_STOCK\", function () { pm.expect(body.code).to.eql(\"INSUFFICIENT_STOCK\"); });",
+                  "pm.test(\"El cuerpo trae el estado 409\", function () { pm.expect(body.status).to.eql(409); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderB}}\",\n  \"sku\": \"GHOST-{{runId}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intenta reservar un producto que no existe. Según el contrato, no hay unidades disponibles para ese SKU, por lo que la API debe responder **409** con `INSUFFICIENT_STOCK`."
+          },
+          "response": []
+        },
+        {
+          "name": "FLASH_SALE con 3 unidades (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 422\", function () { pm.response.to.have.status(422); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error ORDER_LIMIT_EXCEEDED\", function () { pm.expect(body.code).to.eql(\"ORDER_LIMIT_EXCEEDED\"); });",
+                  "pm.test(\"El cuerpo trae el estado 422\", function () { pm.expect(body.status).to.eql(422); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderB}}\",\n  \"sku\": \"{{skuFlash}}\",\n  \"quantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Solicita 3 unidades de `{{skuFlash}}`, aunque `FLASH_SALE` permite como máximo 2 por pedido. La API debe responder **422** con `ORDER_LIMIT_EXCEEDED`. El límite se valida antes que la disponibilidad de stock."
+          },
+          "response": []
+        },
+        {
+          "name": "FLASH_SALE con 2 unidades",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Reservó 2 unidades\", function () { pm.expect(body.quantity).to.eql(2); });",
+                  "pm.test(\"expiresAt es una fecha ISO válida\", function () { pm.expect(new Date(body.expiresAt).toString()).to.not.eql(\"Invalid Date\"); });",
+                  "pm.test(\"expiresAt está entre 4 y 6 minutos a partir de ahora\", function () { const mins = (new Date(body.expiresAt) - Date.now()) / 60000; pm.expect(mins).to.be.within(4, 6); });",
+                  "pm.collectionVariables.set(\"orderFlashExpires\", body.expiresAt);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderFlash}}\",\n  \"sku\": \"{{skuFlash}}\",\n  \"quantity\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reserva el máximo permitido: 2 unidades de `{{skuFlash}}` para `{{orderFlash}}`. Se espera **201** y un vencimiento de aproximadamente 5 minutos. La fecha se guarda en `orderFlashExpires` para las pruebas de expiración."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad FLASH_SALE tras reservar (8)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 8 unidades disponibles\", function () { pm.expect(body.available).to.eql(8); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuFlash}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuFlash}}",
+                "availability"
+              ]
+            },
+            "description": "Comprueba la disponibilidad después de reservar 2 de las 10 unidades. Deben quedar **8 unidades disponibles**."
+          },
+          "response": []
+        },
+        {
+          "name": "Cantidad 0 (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderB}}\",\n  \"sku\": \"{{skuStd}}\",\n  \"quantity\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intenta crear una reserva con 0 unidades. La API debe rechazarla con **400** porque la cantidad debe ser positiva."
+          },
+          "response": []
+        },
+        {
+          "name": "Sin orderId (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });",
+                  "pm.test(\"El mensaje pide el pedido\", function () { pm.expect(body.message).to.eql(\"orderId is required\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{skuStd}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Omite `orderId`. La API debe responder **400** con el mensaje `orderId is required`."
+          },
+          "response": []
+        },
+        {
+          "name": "Sin cantidad (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_REQUEST\", function () { pm.expect(body.code).to.eql(\"INVALID_REQUEST\"); });",
+                  "pm.test(\"El cuerpo trae el estado 400\", function () { pm.expect(body.status).to.eql(400); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });",
+                  "pm.test(\"El mensaje pide la cantidad\", function () { pm.expect(body.message).to.eql(\"quantity is required\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderB}}\",\n  \"sku\": \"{{skuStd}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Omite `quantity`. La API debe responder **400** con el mensaje `quantity is required`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 Confirmaciones",
+      "description": "`POST /api/reservations/{orderId}/confirm`: confirma el pago de una reserva. Una vez confirmada, la reserva pasa a venta y sus unidades no regresan al stock. Esta carpeta utiliza el pedido creado en `04 Reservas`.",
+      "item": [
+        {
+          "name": "Confirmar la reserva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Devuelve el pedido y el estado CONFIRMED\", function () { pm.expect(body.orderId).to.eql(pm.collectionVariables.get(\"orderA\")); pm.expect(body.status).to.eql(\"CONFIRMED\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/{{orderA}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations",
+                "{{orderA}}",
+                "confirm"
+              ]
+            },
+            "description": "Confirma el pago de `{{orderA}}`. Se espera **200** y que la respuesta indique el pedido y el estado `CONFIRMED`."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad no cambia al confirmar (7)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 7 unidades disponibles\", function () { pm.expect(body.available).to.eql(7); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "availability"
+              ]
+            },
+            "description": "Comprueba que confirmar una reserva no descuenta stock por segunda vez. Las 3 unidades ya se habían apartado al crear la reserva, por lo que deben seguir quedando **7 disponibles**."
+          },
+          "response": []
+        },
+        {
+          "name": "Confirmar de nuevo (idempotente)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Sigue CONFIRMED\", function () { pm.expect(body.status).to.eql(\"CONFIRMED\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/{{orderA}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations",
+                "{{orderA}}",
+                "confirm"
+              ]
+            },
+            "description": "Confirma nuevamente `{{orderA}}`. La operación debe ser idempotente: se espera **200** con estado `CONFIRMED`, sin generar un nuevo cambio en el inventario."
+          },
+          "response": []
+        },
+        {
+          "name": "Reenviar la reserva ya confirmada devuelve la misma",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Mismo vencimiento original\", function () { pm.expect(body.expiresAt).to.eql(pm.collectionVariables.get(\"orderAExpires\")); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderA}}\",\n  \"sku\": \"{{skuStd}}\",\n  \"quantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Simula que la aplicación reenvía la misma reserva después de haber confirmado el pedido. La API debe devolver la reserva existente, con su vencimiento original, y no crear una nueva. Se espera **201**."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad sigue en 7",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 7 unidades disponibles\", function () { pm.expect(body.available).to.eql(7); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuStd}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuStd}}",
+                "availability"
+              ]
+            },
+            "description": "Comprueba que las operaciones anteriores no hayan alterado nuevamente el inventario. La disponibilidad debe continuar en **7 unidades**."
+          },
+          "response": []
+        },
+        {
+          "name": "Confirmar un pedido desconocido (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Código de error INVALID_STATE\", function () { pm.expect(body.code).to.eql(\"INVALID_STATE\"); });",
+                  "pm.test(\"El cuerpo trae el estado 409\", function () { pm.expect(body.status).to.eql(409); });",
+                  "pm.test(\"El mensaje no está vacío\", function () { pm.expect(body.message).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/NOPE-{{runId}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations",
+                "NOPE-{{runId}}",
+                "confirm"
+              ]
+            },
+            "description": "Intenta confirmar un pedido que nunca tuvo una reserva. La API debe responder **409** con `INVALID_STATE`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 Expiración (manual, 5 min)",
+      "description": "Estas pruebas dependen del reloj real. Solo pueden dar un resultado concluyente cuando hayan transcurrido **5 minutos** desde la creación de la reserva `FLASH_SALE` en `04 Reservas`. Antes de ese momento, las pruebas se marcan como **omitidas** y muestran cuándo pueden ejecutarse nuevamente. Los casos exactos del instante de expiración se validan en Java mediante `ReservationExpirationTest`.",
+      "item": [
+        {
+          "name": "Las unidades de una reserva vencida vuelven al stock (10)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "const rawExpiry = pm.collectionVariables.get(\"orderFlashExpires\");",
+                  "const expiresAt = rawExpiry ? new Date(rawExpiry) : null;",
+                  "const expired = !!expiresAt && Date.now() >= expiresAt.getTime();",
+                  "const when = expiresAt ? expiresAt.toISOString() : \"(ejecuta antes la carpeta 04)\";",
+                  "if (!expired) {",
+                  "  pm.test.skip(\"Aún no vence la reserva FLASH_SALE; vuelve a ejecutar después de \" + when);",
+                  "} else {",
+                  "  pm.test(\"Las 2 unidades vencidas volvieron al stock\", function () { pm.expect(body.available).to.eql(10); });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuFlash}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuFlash}}",
+                "availability"
+              ]
+            },
+            "description": "Comprueba que las 2 unidades reservadas para `FLASH_SALE` regresen al inventario cuando la reserva vence. Después de 5 minutos se esperan **10 unidades disponibles**. Si todavía no ha transcurrido el tiempo necesario, la prueba se omite."
+          },
+          "response": []
+        },
+        {
+          "name": "Confirmar una reserva vencida (409)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rawExpiry = pm.collectionVariables.get(\"orderFlashExpires\");",
+                  "const expiresAt = rawExpiry ? new Date(rawExpiry) : null;",
+                  "const expired = !!expiresAt && Date.now() >= expiresAt.getTime();",
+                  "const when = expiresAt ? expiresAt.toISOString() : \"(ejecuta antes la carpeta 04)\";",
+                  "pm.collectionVariables.set(\"confirmTarget\", expired ? pm.collectionVariables.get(\"orderFlash\") : \"PENDING-\" + pm.collectionVariables.get(\"runId\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rawExpiry = pm.collectionVariables.get(\"orderFlashExpires\");",
+                  "const expiresAt = rawExpiry ? new Date(rawExpiry) : null;",
+                  "const expired = !!expiresAt && Date.now() >= expiresAt.getTime();",
+                  "const when = expiresAt ? expiresAt.toISOString() : \"(ejecuta antes la carpeta 04)\";",
+                  "if (!expired) {",
+                  "  pm.test.skip(\"Aún no vence la reserva FLASH_SALE; vuelve a ejecutar después de \" + when);",
+                  "} else {",
+                  "  pm.test(\"Estado HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "  pm.test(\"Código INVALID_STATE\", function () { pm.expect(pm.response.json().code).to.eql(\"INVALID_STATE\"); });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/{{confirmTarget}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations",
+                "{{confirmTarget}}",
+                "confirm"
+              ]
+            },
+            "description": "Intenta confirmar una reserva que ya venció. La API debe responder **409** con `INVALID_STATE`, porque una reserva expirada ya no puede confirmarse. Antes del vencimiento, la prueba apunta deliberadamente a un pedido inexistente para evitar confirmar la reserva por accidente."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
