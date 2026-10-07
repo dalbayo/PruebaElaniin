@@ -8,6 +8,10 @@ Para cada decisión intento indicar la prueba que la respalda. De esta forma, si
 
 El contexto completo del ejercicio y las instrucciones para ejecutar las pruebas están en el [README](README.md).
 
+> **Ajuste posterior:** la documentación Swagger no formaba parte de la entrega inicial. La agregué después, como un ajuste aparte, y lo que cambió está detallado en la sección 6.
+
+Con la aplicación levantada (`java -jar target/inventory-reservations-1.0.0.jar`), la API se puede explorar y probar desde el navegador con Swagger: <http://localhost:8080/swagger-ui.html>. El contrato en JSON está en <http://localhost:8080/v3/api-docs>. Por qué lo incluí y qué cambiaría para producción se explica en las secciones 2 y 4.
+
 ## 1. Supuestos y decisiones de comportamiento
 
 ### Reservas
@@ -146,6 +150,10 @@ En esta parte explico las decisiones de diseño que considero más importantes y
 
   Se comprueba en `InventoryApiTest`.
 
+- **La API se documenta con Swagger (springdoc-openapi), agregado como ajuste posterior a la entrega inicial.** Es la única dependencia que agregué además de Spring Boot. Los endpoints se descubren solos a partir de `InventoryController`, y las descripciones y códigos de error están en anotaciones sobre el controlador y los modelos; no hay un archivo de documentación aparte que se pueda desactualizar. La interfaz queda en `/swagger-ui.html` y el contrato en `/v3/api-docs`. Esto no toca el contrato original ni las reglas de negocio. Para producción conviene desactivarla o protegerla (ver la sección 4).
+
+  Se comprueba en `OpenApiDocsTest`.
+
 - **`ApiExceptionHandler` convierte los errores del contrato en respuestas HTTP.** `IllegalArgumentException` se convierte en 400, `InsufficientStockException` en 409, `OrderLimitExceededException` en 422 e `IllegalStateException` en 409. No añadí nuevas excepciones porque el contrato no se puede modificar y el servicio utiliza algunas excepciones para diferentes situaciones; el código y el mensaje de error permiten distinguir el caso concreto.
 
 - **El aviso de la aplicación web solo escribe en el log.** `LoggingStockAlertListener` representa el canal disponible en esta entrega. No implementé el envío real de correos porque ese canal debe ser proporcionado por el equipo y puede incorporarse mediante `CompositeStockAlertListener.of(...)` sin modificar el servicio.
@@ -172,7 +180,7 @@ Estas cosas no se quedaron fuera por olvido. Las revisé y decidí no incluirlas
 
 - **Un canal real de notificaciones.** No se implementó correo, SMS ni chat; en esta versión el aviso se escribe en el log.
 
-- **Documentación OpenAPI, versionado y paginación.**
+- **Versionado y paginación de la API.** La documentación OpenAPI sí está incluida (ver la sección 2), pero la API no tiene versión en la ruta ni listados que paginar.
 
 - **Cambio de configuración sin reiniciar la aplicación.**
 
@@ -193,6 +201,8 @@ Si este servicio fuera a producción, estas serían mis prioridades.
 - **Añadiría autenticación y autorización a la API REST.** Actualmente, cualquiera que tenga acceso a la red podría intentar reservar o agregar stock.
 
 ### Importante
+
+- **Apagaría o protegería Swagger fuera de desarrollo.** Hoy `/swagger-ui.html` y `/v3/api-docs` están abiertos. En producción los desactivaría con `springdoc.swagger-ui.enabled=false` y `springdoc.api-docs.enabled=false`, o los dejaría detrás de la misma autenticación que el resto de la API.
 
 - **Mantendría un contador de unidades apartadas.** Actualmente `ProductStock.availableAt` recorre las reservas del producto cada vez que necesita calcular la disponibilidad. Con miles de reservas sobre un producto muy demandado, este enfoque podría convertirse en un cuello de botella.
 
@@ -226,8 +236,32 @@ No me limité a comprobar los casos felices. Las pruebas buscan cubrir también 
 
 - **Pruebas de la API REST.** `InventoryApiTest` simula las peticiones HTTP utilizando un reloj controlable y comprueba códigos HTTP, cuerpos de error, reintentos y vencimientos.
 
-- **Prueba de la API con Postman.** La colección se ejecutó con Newman contra la aplicación levantada y todas las pruebas pasaron. La colección no está incluida en este repositorio. La expiración real de cinco minutos se probó por separado porque depende del reloj real; el comportamiento exacto de la expiración queda cubierto por las pruebas de Java.
+- **Pruebas de la documentación Swagger.** `OpenApiDocsTest` comprueba que `/v3/api-docs` lista los cinco endpoints, que `POST /api/reservations` documenta los códigos 201, 400, 409 y 422, que cada petición de registro y de reserva trae sus ejemplos por categoría, que la descripción incluye la guía para validar, y que la página de Swagger UI se sirve. Si alguien cambia una ruta del controlador o quita la dependencia, este test avisa.
+
+- **Prueba de la API con Postman.** La colección está en el repositorio (`inventory-reservations-postman.json`). Se ejecutó con Newman contra la aplicación levantada: 54 peticiones y 159 aserciones, todas correctas, y se puede repetir sin reiniciar la aplicación. Cubre el plazo y el límite de las tres categorías, y una carpeta que lleva un producto por el umbral de bajo stock: el aviso no se puede leer por la API, así que esa parte se confirma mirando el log (deben aparecer exactamente dos avisos por ejecución). La expiración real de cinco minutos se probó por separado porque depende del reloj real; el comportamiento exacto de la expiración queda cubierto por las pruebas de Java.
 
 - **Los tres tests originales de `InventoryServiceTest` siguen pasando sin modificaciones.** Tampoco modifiqué ningún archivo dentro de `com.store.inventory.api`.
 
 > **Qué no demuestran estas pruebas:** no pueden garantizar que no exista ninguna condición de carrera entre hilos; únicamente hacen muy poco probable que una carrera pase desapercibida. Tampoco demuestran cómo se comportaría el servicio con varias instancias ni cuál sería su rendimiento bajo una carga de producción.
+
+## 6. Ajustes posteriores a la entrega inicial
+
+### Documentación Swagger (OpenAPI)
+
+Agregué Swagger después de terminar y probar la entrega inicial, para que quien use la API pueda ver y probar los endpoints sin leer el código ni importar una colección.
+
+Qué cambió:
+
+- **`pom.xml`:** una dependencia nueva, `springdoc-openapi-starter-webmvc-ui` (versión 2.6.0, guardada en la propiedad `springdoc.version`).
+- **`OpenApiConfig` (archivo nuevo):** el título, la versión y la descripción general de la API.
+- **`InventoryController` y `ApiModels`:** solo anotaciones (`@Operation`, `@ApiResponse`, `@Schema`, `@Parameter`, `@ExampleObject`) con descripciones, ejemplos y los códigos de error 400, 409 y 422. No se tocó la lógica.
+- **Swagger pensado para validar:** cada registro y cada reserva trae un ejemplo por categoría, incluido el caso `FLASH_SALE` con 3 unidades (debe dar 422), y la descripción de la API trae una guía paso a paso para comprobar las reglas.
+- **`OpenApiDocsTest` (archivo nuevo):** cinco pruebas que protegen la documentación, sus ejemplos y la guía.
+- **Colección de Postman (`inventory-reservations-postman.json`):** las variables traen valores por defecto concretos (`STD-001`, `FLASH-001`, ...), y agregué lo que faltaba para validar el enunciado: la reserva `PRE_ORDER` con su plazo de 24 horas, y la carpeta `07 Alerta de bajo stock`. También corregí la ruta del archivo que mostraba su descripción, y agregué la tabla que relaciona cada requisito con la parte que lo valida. Pasó de 41 a 54 peticiones.
+- **Este documento:** la intro y las secciones 2, 3, 4 y 5 mencionan Swagger.
+
+Qué no cambió:
+
+- El paquete `com.store.inventory.api` ni la firma de `Inventory.create`.
+- Las reglas de negocio ni el comportamiento de ningún endpoint.
+- Los tests existentes. Después del ajuste pasan 411 pruebas (las 406 anteriores más las 5 nuevas) y la colección de Postman pasa completa (54 peticiones, 159 aserciones).

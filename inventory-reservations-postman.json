@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Inventory Reservations API",
-    "description": "# Inventory Reservations API\n\nColección de Postman para probar de principio a fin la API REST del servicio de reservas de inventario (`com.store.inventory.web`).\n\nLa colección recorre el flujo principal del servicio: registra productos, agrega stock, consulta disponibilidad, crea reservas, confirma pedidos y verifica los casos que la API debe rechazar.\n\n## Antes de empezar\n\n1. Inicia la aplicación con `mvn spring-boot:run`, o genera el JAR con `mvn package -DskipTests` y ejecútalo con `java -jar target/inventory-reservations-1.0.0.jar`.\n2. Por defecto, la aplicación escucha en `http://localhost:8080`.\n3. Si utilizas otro puerto, actualiza la variable `baseUrl`.\n4. No necesitas autenticación y no hay una base de datos detrás de esta prueba. La información se mantiene en memoria y se pierde cuando reinicias la aplicación.\n\n## Cómo ejecutar la colección\n\n### Desde Postman\n\nAbre el **Collection Runner**, selecciona esta colección y ejecútala **completa y en el orden en que aparece**.\n\n### Desde Newman\n\n```bash\nnpx newman run postman/inventory-reservations-collection.json\n```\n\nSi la aplicación utiliza otro puerto:\n\n```bash\nnpx newman run postman/inventory-reservations-collection.json --env-var baseUrl=http://localhost:9090\n```\n\n## Por qué es importante respetar el orden\n\nLas carpetas forman un flujo. Primero se crean los productos, después se agrega el stock, luego se consulta la disponibilidad, se realizan las reservas y finalmente se confirman.\n\nLa petición **00 Preparación** genera identificadores únicos para cada ejecución. Esto permite repetir la colección sin tener que reiniciar la aplicación.\n\nPuedes ejecutar peticiones individuales, pero algunas dependen de los datos creados por las peticiones anteriores y, por tanto, pueden fallar si no se ejecutó previamente el flujo correspondiente.\n\n## Qué cubre cada carpeta\n\n| Carpeta | Peticiones | Qué valida |\n| --- | ---: | --- |\n| 00 Preparación | 1 | Inicializa una ejecución y genera identificadores únicos. |\n| 01 Productos | 9 | Registro de productos y validación de datos inválidos. |\n| 02 Stock | 7 | Carga de inventario y validación de cantidades inválidas. |\n| 03 Disponibilidad | 2 | Consulta del stock que todavía puede reservarse. |\n| 04 Reservas | 14 | Creación de reservas, reenvíos, límites por categoría y falta de stock. |\n| 05 Confirmaciones | 6 | Confirmación del pago, reenvíos y pedidos desconocidos. |\n| 06 Expiración (manual) | 2 | Liberación del stock cuando una reserva vence. Requiere esperar 5 minutos. |\n\n## Códigos de error\n\nLos errores siguen una estructura común:\n\n`{\"status\": 409, \"code\": \"INSUFFICIENT_STOCK\", \"message\": \"...\"}`\n\n| HTTP | Código | Cuándo se utiliza |\n| ---: | --- | --- |\n| 400 | `INVALID_REQUEST` | La petición está incompleta o contiene datos inválidos. También se utiliza para conflictos de categoría o de pedido. |\n| 409 | `INSUFFICIENT_STOCK` | No hay suficientes unidades disponibles o el producto no existe. |\n| 409 | `INVALID_STATE` | Se intenta confirmar un pedido que no tiene una reserva activa. |\n| 422 | `ORDER_LIMIT_EXCEEDED` | El pedido supera el límite permitido para su categoría. Por ejemplo, `FLASH_SALE` permite hasta 2 unidades. |\n\n## Resultado esperado\n\nEn una ejecución completa y normal se esperan **41 peticiones y 131 aserciones en verde**.\n\nLas dos pruebas de la carpeta **06 Expiración** pueden aparecer como **omitidas** si todavía no han transcurrido 5 minutos desde la reserva `FLASH_SALE`. Esto es intencional y no representa un fallo.\n\n## Qué no cubre esta colección\n\n- **Avisos de bajo stock:** no existe un endpoint para probarlos. El servicio los envía a `StockAlertListener`, que en esta aplicación únicamente escribe el aviso en el log. Estos casos se validan mediante los tests de Java.\n- **Expiración exacta:** el comportamiento en el instante preciso en que vence una reserva se prueba en Java utilizando un reloj controlado. En Postman solo puede comprobarse esperando el tiempo real.\n- **Concurrencia:** los escenarios con varios clientes reservando al mismo tiempo se validan en Java mediante `ConcurrencyTest`.\n- **Diferencias de hora:** las comprobaciones de vencimiento utilizan el reloj de la máquina desde la que se ejecuta Postman. Si la aplicación y Postman están en equipos con relojes significativamente desfasados, estas pruebas pueden fallar.",
+    "description": "# Inventory Reservations API\n\nColección de Postman para probar de principio a fin la API REST del servicio de reservas de inventario (`com.store.inventory.web`).\n\nLa colección recorre el flujo principal del servicio: registra productos, agrega stock, consulta disponibilidad, crea reservas de las tres categorías, confirma pedidos, comprueba el aviso de bajo stock y verifica los casos que la API debe rechazar.\n\n## Antes de empezar\n\n1. Inicia la aplicación con `mvn spring-boot:run`, o genera el JAR con `mvn package -DskipTests` y ejecútalo con `java -jar target/inventory-reservations-1.0.0.jar`.\n2. Por defecto, la aplicación escucha en `http://localhost:8080`.\n3. Si utilizas otro puerto, actualiza la variable `baseUrl`.\n4. No necesitas autenticación y no hay una base de datos detrás de esta prueba. La información se mantiene en memoria y se pierde cuando reinicias la aplicación.\n\n## Cómo ejecutar la colección\n\n### Desde Postman\n\nAbre el **Collection Runner**, selecciona esta colección y ejecútala **completa y en el orden en que aparece**.\n\n### Desde Newman\n\n```bash\nnpx newman run inventory-reservations-postman.json\n```\n\nSi la aplicación utiliza otro puerto:\n\n```bash\nnpx newman run inventory-reservations-postman.json --env-var baseUrl=http://localhost:9090\n```\n\n## Valores por defecto\n\nTodas las variables traen un valor por defecto listo para usar (`STD-001`, `FLASH-001`, `PRE-001`, `ALERT-001`, `ORDER-A-001`, ...), de modo que cada petición se ve completa y se puede enviar a mano. Al ejecutar la colección, la petición **00 Preparación** reemplaza esos valores por otros únicos (`STD-<runId>`, ...), así cada ejecución parte de datos nuevos y puedes repetirla sin reiniciar la aplicación.\n\nSi envías una petición suelta con los valores por defecto, la aplicación debe estar recién arrancada: el stock se acumula y las cantidades esperadas dejarían de coincidir.\n\n## Por qué es importante respetar el orden\n\nLas carpetas forman un flujo. Primero se crean los productos, después se agrega el stock, luego se consulta la disponibilidad, se realizan las reservas y finalmente se confirman.\n\nLa petición **00 Preparación** genera identificadores únicos para cada ejecución. Esto permite repetir la colección sin tener que reiniciar la aplicación.\n\nPuedes ejecutar peticiones individuales, pero algunas dependen de los datos creados por las peticiones anteriores y, por tanto, pueden fallar si no se ejecutó previamente el flujo correspondiente.\n\n## Qué cubre cada carpeta\n\n| Carpeta | Peticiones | Qué valida |\n| --- | ---: | --- |\n| 00 Preparación | 1 | Inicializa una ejecución y genera identificadores únicos. |\n| 01 Productos | 9 | Registro de productos y validación de datos inválidos. |\n| 02 Stock | 7 | Carga de inventario y validación de cantidades inválidas. |\n| 03 Disponibilidad | 2 | Consulta del stock que todavía puede reservarse. |\n| 04 Reservas | 16 | Creación de reservas, reenvíos, plazo y límite de cada categoría (`STANDARD`, `PRE_ORDER`, `FLASH_SALE`) y falta de stock. |\n| 05 Confirmaciones | 6 | Confirmación del pago, reenvíos y pedidos desconocidos. |\n| 06 Expiración (manual) | 2 | Liberación del stock cuando una reserva vence. Requiere esperar 5 minutos. |\n| 07 Alerta de bajo stock | 11 | Aviso al llegar a 5 unidades o menos, sin repetirlo, y rearme tras reabastecer. El aviso se comprueba en el log. |\n\n## Qué requisito valida cada parte\n\n| Requisito del enunciado | Dónde se valida |\n| --- | --- |\n| Al enviar el carrito, las unidades quedan reservadas | `04 Reservas`: disponibilidad tras reservar (10 → 7). |\n| Reenvíos de la app móvil no descuentan dos veces | `04 Reservas`: reenviar el mismo pedido devuelve la misma reserva y la disponibilidad no cambia. |\n| `STANDARD`: 15 minutos, sin límite | `04 Reservas`: vencimiento entre 13 y 17 minutos con 3 unidades. |\n| `PRE_ORDER`: 24 horas, sin límite | `04 Reservas`: vencimiento entre 23 y 25 horas con 4 unidades. |\n| `FLASH_SALE`: 5 minutos, máximo 2 unidades | `04 Reservas`: 3 unidades dan 422; 2 unidades se aceptan con vencimiento entre 4 y 6 minutos. |\n| Si el pago se aprueba, las unidades quedan vendidas | `05 Confirmaciones`: confirmar no cambia la disponibilidad y es repetible. |\n| Si no paga a tiempo, la reserva se libera | `06 Expiración`: las unidades vuelven al stock tras 5 minutos (manual). |\n| Aviso con 5 unidades o menos, sin repetirlo | `07 Alerta de bajo stock`: dos avisos exactos en el log. |\n| No sobrevender | `04 Reservas`: stock insuficiente da 409. La carrera de muchos clientes a la vez la cubre `ConcurrencyTest`. |\n\n## Códigos de error\n\nLos errores siguen una estructura común:\n\n`{\"status\": 409, \"code\": \"INSUFFICIENT_STOCK\", \"message\": \"...\"}`\n\n| HTTP | Código | Cuándo se utiliza |\n| ---: | --- | --- |\n| 400 | `INVALID_REQUEST` | La petición está incompleta o contiene datos inválidos. También se utiliza para conflictos de categoría o de pedido. |\n| 409 | `INSUFFICIENT_STOCK` | No hay suficientes unidades disponibles o el producto no existe. |\n| 409 | `INVALID_STATE` | Se intenta confirmar un pedido que no tiene una reserva activa. |\n| 422 | `ORDER_LIMIT_EXCEEDED` | El pedido supera el límite permitido para su categoría. Por ejemplo, `FLASH_SALE` permite hasta 2 unidades. |\n\n## Resultado esperado\n\nEn una ejecución completa y normal se esperan **54 peticiones y 159 aserciones en verde**.\n\nLas dos pruebas de la carpeta **06 Expiración** pueden aparecer como **omitidas** si todavía no han transcurrido 5 minutos desde la reserva `FLASH_SALE`. Esto es intencional y no representa un fallo.\n\n## Qué no cubre esta colección\n\n- **Verificación automática de los avisos de bajo stock:** la API no tiene un endpoint que los exponga. El servicio los envía a `StockAlertListener`, que en esta aplicación solo escribe el aviso en el log. La carpeta `07` deja el stock en las cantidades correctas y las aserciones de Postman las comprueban, pero la presencia de los avisos la compruebas tú en el log (deben ser exactamente dos). La regla completa, incluida la precisión de no repetir, se prueba de forma automática en Java con `LowStockNotifierTest`.\n- **Expiración exacta:** el comportamiento en el instante preciso en que vence una reserva se prueba en Java utilizando un reloj controlado. En Postman solo puede comprobarse esperando el tiempo real.\n- **Concurrencia:** los escenarios con varios clientes reservando al mismo tiempo se validan en Java mediante `ConcurrencyTest`.\n- **Diferencias de hora:** las comprobaciones de vencimiento utilizan el reloj de la máquina desde la que se ejecuta Postman. Si la aplicación y Postman están en equipos con relojes significativamente desfasados, estas pruebas pueden fallar.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -13,43 +13,43 @@
     },
     {
       "key": "runId",
-      "value": "manual",
+      "value": "001",
       "type": "string",
-      "description": "Identificador único de la ejecución. Lo genera automáticamente la petición `Inicializar corrida` y se utiliza para crear SKU y pedidos que no interfieran con ejecuciones anteriores."
+      "description": "Identificador de la ejecución. Valor por defecto: `001`. La petición `Inicializar corrida` lo reemplaza por uno único en cada ejecución para poder repetir la colección sin reiniciar la aplicación."
     },
     {
       "key": "skuStd",
-      "value": "STD-manual",
+      "value": "STD-001",
       "type": "string",
       "description": "SKU del producto de prueba `STANDARD`. Esta categoría tiene 15 minutos para completar el pago y no tiene límite de unidades por pedido."
     },
     {
       "key": "skuFlash",
-      "value": "FLASH-manual",
+      "value": "FLASH-001",
       "type": "string",
       "description": "SKU del producto de prueba `FLASH_SALE`. La reserva dura 5 minutos y cada pedido puede incluir como máximo 2 unidades."
     },
     {
       "key": "skuPre",
-      "value": "PRE-manual",
+      "value": "PRE-001",
       "type": "string",
       "description": "SKU del producto de prueba `PRE_ORDER`. La reserva dura 24 horas y no tiene límite de unidades por pedido."
     },
     {
       "key": "orderA",
-      "value": "ORDER-A-manual",
+      "value": "ORDER-A-001",
       "type": "string",
       "description": "Pedido principal de la prueba. Reserva 3 unidades `STANDARD` y posteriormente se confirma en la carpeta `05 Confirmaciones`."
     },
     {
       "key": "orderB",
-      "value": "ORDER-B-manual",
+      "value": "ORDER-B-001",
       "type": "string",
       "description": "Pedido utilizado en los escenarios que deben fallar, por ejemplo, cuando no hay stock, el producto no existe o se supera un límite. No llega a tener una reserva válida."
     },
     {
       "key": "orderFlash",
-      "value": "ORDER-F-manual",
+      "value": "ORDER-F-001",
       "type": "string",
       "description": "Pedido utilizado para probar la expiración de una reserva `FLASH_SALE`. Reserva 2 unidades y se deja sin confirmar para comprobar que el stock se libera después de 5 minutos."
     },
@@ -67,9 +67,45 @@
     },
     {
       "key": "confirmTarget",
-      "value": "PENDING-manual",
+      "value": "PENDING-001",
       "type": "string",
       "description": "Pedido utilizado por la prueba de confirmación. Mientras la reserva `FLASH_SALE` siga activa apunta deliberadamente a un pedido inexistente, para evitar confirmarla antes de tiempo."
+    },
+    {
+      "key": "skuAlert",
+      "value": "ALERT-001",
+      "type": "string",
+      "description": "SKU del producto `STANDARD` que usa la carpeta `07 Alerta de bajo stock`. Con 10 unidades de stock, sirve para cruzar el umbral de 5."
+    },
+    {
+      "key": "orderPre",
+      "value": "ORDER-P-001",
+      "type": "string",
+      "description": "Pedido que reserva 4 unidades `PRE_ORDER` (vencimiento a 24 horas, sin límite por pedido)."
+    },
+    {
+      "key": "orderAlert1",
+      "value": "ORDER-AL1-001",
+      "type": "string",
+      "description": "Primer pedido de la carpeta `07`: reserva 4 unidades y deja 6 (sin aviso)."
+    },
+    {
+      "key": "orderAlert2",
+      "value": "ORDER-AL2-001",
+      "type": "string",
+      "description": "Segundo pedido de la carpeta `07`: reserva 1 unidad y deja 5 (primer aviso)."
+    },
+    {
+      "key": "orderAlert3",
+      "value": "ORDER-AL3-001",
+      "type": "string",
+      "description": "Tercer pedido de la carpeta `07`: reserva 1 unidad y deja 4 (no repite el aviso)."
+    },
+    {
+      "key": "orderAlert4",
+      "value": "ORDER-AL4-001",
+      "type": "string",
+      "description": "Cuarto pedido de la carpeta `07`: tras reabastecer, reserva 9 unidades y deja 5 (segundo aviso)."
     }
   ],
   "item": [
@@ -94,6 +130,12 @@
                   "set(\"orderA\", \"ORDER-A-\" + run);",
                   "set(\"orderB\", \"ORDER-B-\" + run);",
                   "set(\"orderFlash\", \"ORDER-F-\" + run);",
+                  "set(\"skuAlert\", \"ALERT-\" + run);",
+                  "set(\"orderPre\", \"ORDER-P-\" + run);",
+                  "set(\"orderAlert1\", \"ORDER-AL1-\" + run);",
+                  "set(\"orderAlert2\", \"ORDER-AL2-\" + run);",
+                  "set(\"orderAlert3\", \"ORDER-AL3-\" + run);",
+                  "set(\"orderAlert4\", \"ORDER-AL4-\" + run);",
                   "set(\"orderAExpires\", \"\");",
                   "set(\"orderFlashExpires\", \"\");"
                 ]
@@ -1484,6 +1526,88 @@
           "response": []
         },
         {
+          "name": "Reservar 4 unidades PRE_ORDER (24 h, sin límite)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Reservó 4 unidades (PRE_ORDER no tiene límite por pedido)\", function () { pm.expect(body.quantity).to.eql(4); });",
+                  "pm.test(\"expiresAt es una fecha ISO válida\", function () { pm.expect(new Date(body.expiresAt).toString()).to.not.eql(\"Invalid Date\"); });",
+                  "pm.test(\"expiresAt está entre 23 y 25 horas a partir de ahora\", function () { const hours = (new Date(body.expiresAt) - Date.now()) / 3600000; pm.expect(hours).to.be.within(23, 25); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderPre}}\",\n  \"sku\": \"{{skuPre}}\",\n  \"quantity\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reserva 4 unidades de `{{skuPre}}`. Valida dos reglas de `PRE_ORDER`: el cliente tiene **24 horas** para pagar (el vencimiento debe quedar entre 23 y 25 horas) y **no hay límite por pedido** (4 unidades, más que el máximo de `FLASH_SALE`). Se espera **201**."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad PRE_ORDER tras reservar (6)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 6 unidades disponibles\", function () { pm.expect(body.available).to.eql(6); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuPre}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuPre}}",
+                "availability"
+              ]
+            },
+            "description": "Se reservaron 4 de las 10 unidades. Deben quedar **6 unidades disponibles**."
+          },
+          "response": []
+        },
+        {
           "name": "Cantidad 0 (400)",
           "event": [
             {
@@ -1952,6 +2076,474 @@
               ]
             },
             "description": "Intenta confirmar una reserva que ya venció. La API debe responder **409** con `INVALID_STATE`, porque una reserva expirada ya no puede confirmarse. Antes del vencimiento, la prueba apunta deliberadamente a un pedido inexistente para evitar confirmar la reserva por accidente."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 Alerta de bajo stock (revisar el log)",
+      "description": "Valida la regla de **aviso de bajo stock**: el servicio avisa cuando las unidades disponibles de un producto bajan a **5 o menos**, y **no repite** el aviso mientras el stock siga bajo.\n\nLa API REST no expone los avisos: en esta aplicación se escriben en el log. Por eso estas peticiones comprueban las cantidades y **tú compruebas el aviso en la consola donde corre la aplicación**. Debes ver **exactamente dos** líneas como esta, ni más ni menos:\n\n```\nLow stock alert: sku=<ALERT-...> availableUnits=5\n```\n\n- La primera aparece al dejar 5 unidades (petición 6). Al dejar 6 no hay aviso, y al bajar a 4 no se repite.\n- La segunda aparece después de reabastecer por encima del umbral y volver a bajar a 5 (petición 11): el aviso se rearma con el reabastecimiento.\n\nEjecuta la carpeta en orden. Las aserciones de Postman comprueban el stock, y el aviso lo confirmas en el log.",
+      "item": [
+        {
+          "name": "Registrar producto STANDARD para la alerta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Devuelve la categoría STANDARD\", function () { pm.expect(body.category).to.eql(\"STANDARD\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{skuAlert}}\",\n  \"category\": \"STANDARD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Registra `{{skuAlert}}` como `STANDARD`. Se espera **201**."
+          },
+          "response": []
+        },
+        {
+          "name": "Agregar 10 unidades",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 10 unidades disponibles\", function () { pm.expect(body.available).to.eql(10); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuAlert}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuAlert}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Agrega 10 unidades. La respuesta trae las unidades disponibles: **10**. Sin aviso, porque 10 es mayor que 5."
+          },
+          "response": []
+        },
+        {
+          "name": "Reservar 4 unidades (quedan 6, sin aviso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Reservó 4 unidades\", function () { pm.expect(body.quantity).to.eql(4); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderAlert1}}\",\n  \"sku\": \"{{skuAlert}}\",\n  \"quantity\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reserva 4 de las 10 unidades. Se espera **201**."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad: 6 (sin aviso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 6 unidades disponibles\", function () { pm.expect(body.available).to.eql(6); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuAlert}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuAlert}}",
+                "availability"
+              ]
+            },
+            "description": "Quedan **6 unidades**: todavía por encima del umbral. **No debe aparecer ningún aviso** en el log."
+          },
+          "response": []
+        },
+        {
+          "name": "Reservar 1 unidad (quedan 5, primer aviso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Reservó 1 unidad\", function () { pm.expect(body.quantity).to.eql(1); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderAlert2}}\",\n  \"sku\": \"{{skuAlert}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reserva 1 unidad más. Se espera **201**. Esta reserva deja el stock en el umbral."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad: 5 (AVISO #1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 5 unidades disponibles\", function () { pm.expect(body.available).to.eql(5); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuAlert}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuAlert}}",
+                "availability"
+              ]
+            },
+            "description": "Quedan **5 unidades**, el umbral exacto. **En el log debe aparecer el primer aviso** con `availableUnits=5`."
+          },
+          "response": []
+        },
+        {
+          "name": "Reservar 1 unidad (quedan 4, no repite el aviso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Reservó 1 unidad\", function () { pm.expect(body.quantity).to.eql(1); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderAlert3}}\",\n  \"sku\": \"{{skuAlert}}\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reserva 1 unidad más. Se espera **201**."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad: 4 (sin aviso repetido)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 4 unidades disponibles\", function () { pm.expect(body.available).to.eql(4); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuAlert}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuAlert}}",
+                "availability"
+              ]
+            },
+            "description": "Quedan **4 unidades**, siguen bajo el umbral. **No debe aparecer un segundo aviso**: el servicio no repite el aviso hasta que se reabastezca."
+          },
+          "response": []
+        },
+        {
+          "name": "Reabastecer 10 unidades (rearma el aviso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 14 unidades disponibles\", function () { pm.expect(body.available).to.eql(14); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuAlert}}/stock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuAlert}}",
+                "stock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Agrega 10 unidades: pasan de 4 a **14**, otra vez por encima del umbral. Esto **rearma** el aviso."
+          },
+          "response": []
+        },
+        {
+          "name": "Reservar 9 unidades (quedan 5, segundo aviso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Reservó 9 unidades\", function () { pm.expect(body.quantity).to.eql(9); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{orderAlert4}}\",\n  \"sku\": \"{{skuAlert}}\",\n  \"quantity\": 9\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reserva 9 de las 14 unidades. Se espera **201**. Deja el stock otra vez en el umbral."
+          },
+          "response": []
+        },
+        {
+          "name": "Disponibilidad: 5 (AVISO #2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Estado HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Hay 5 unidades disponibles\", function () { pm.expect(body.available).to.eql(5); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{skuAlert}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{skuAlert}}",
+                "availability"
+              ]
+            },
+            "description": "Quedan **5 unidades** otra vez. **En el log debe aparecer el segundo aviso**. En total, la carpeta produce exactamente 2 avisos."
           },
           "response": []
         }
