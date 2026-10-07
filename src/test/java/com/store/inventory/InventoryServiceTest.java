@@ -16,37 +16,28 @@ class InventoryServiceTest {
 
     @BeforeEach
     void setUp() {
-        /*
-         * service = Inventory.create(Clock.systemUTC(), (sku, available) -> { });
-         * service.registerProduct("SKU-1", ProductCategory.STANDARD);
-         */
+        service = Inventory.create(Clock.systemUTC(), (sku, available) -> { });
+        service.registerProduct("SKU-1", ProductCategory.STANDARD);
     }
 
     @Test
     void reservingReducesAvailableUnits() {
-        /*
-         * service.addStock("SKU-1", 10);
-         * service.reserve("ORDER-1", "SKU-1", 3);
-         * assertEquals(7, service.available("SKU-1"));
-         */
+        service.addStock("SKU-1", 10);
+        service.reserve("ORDER-1", "SKU-1", 3);
+        assertEquals(7, service.available("SKU-1"));
     }
 
     @Test
     void cannotReserveMoreThanAvailable() {
-        /*
-         * service.addStock("SKU-1", 2);
-         * assertThrows(InsufficientStockException.class, () ->
-         * service.reserve("ORDER-1", "SKU-1", 3));
-         */
+        service.addStock("SKU-1", 2);
+        assertThrows(InsufficientStockException.class, () -> service.reserve("ORDER-1", "SKU-1", 3));
     }
 
     @Test
     void confirmedUnitsStaySold() {
-        /*
-         * service.addStock("SKU-1", 5);
-         * service.reserve("ORDER-1", "SKU-1", 2);
-         * service.confirm("ORDER-1");
-         * assertEquals(3, service.available("SKU-1"));
-         */
+        service.addStock("SKU-1", 5);
+        service.reserve("ORDER-1", "SKU-1", 2);
+        service.confirm("ORDER-1");
+        assertEquals(3, service.available("SKU-1"));
     }
 }
