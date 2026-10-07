@@ -1,0 +1,160 @@
+# =========================
+
+# Java
+
+# =========================
+
+*.class
+*.log
+
+# Java archives
+
+*.jar
+*.war
+*.ear
+*.zip
+
+# JVM crash logs
+
+hs_err_pid*
+replay_pid*
+
+# =========================
+
+# Maven
+
+# =========================
+
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+.flattened-pom.xml
+
+# =========================
+
+# IDE - IntelliJ IDEA
+
+# =========================
+
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# =========================
+
+# IDE - Visual Studio Code
+
+# =========================
+
+.vscode/
+.history/
+
+# =========================
+
+# Eclipse
+
+# =========================
+
+.classpath
+.project
+.settings/
+.factorypath
+
+# =========================
+
+# NetBeans
+
+# =========================
+
+/nbproject/private/
+/nbbuild/
+/dist/
+/.nb-gradle/
+build/
+
+# =========================
+
+# OS
+
+# =========================
+
+# Windows
+
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+# macOS
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+
+*~
+
+# =========================
+
+# Environment / Secrets
+
+# =========================
+
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+
+# Local configuration
+
+application-local.properties
+application-local.yml
+application-local.yaml
+
+# =========================
+
+# Temporary files
+
+# =========================
+
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Python virtual environment
+
+.venv/
+venv/
+ENV/
+
+# =========================
+
+# Test / Coverage
+
+# =========================
+
+coverage/
+*.exec
+*.jacoco
+jacoco/
+surefire-reports/
+
+# =========================
+
+# Misc
+
+# =========================
+
+.DS_Store
+*.bak
+*.orig
+*.rej
